@@ -28,8 +28,18 @@ public class ObjectiveManager : MonoBehaviour
     [Tooltip("Parent transform yang berisi semua titik spawn (spawn points).")]
     [SerializeField] private Transform spawnPointsRoot;
 
+    [Tooltip("Parent transform untuk mengelompokkan semua objek belanjaan yang di-spawn (mencegah Find global).")]
+    [SerializeField] private Transform spawnedObjectsParent;
+
     [Tooltip("Waktu jeda (detik) antar setiap spawn objek untuk meminimalkan beban CPU (terutama di mobile).")]
     [SerializeField] private float spawnDelay = 0.05f;
+
+    [Header("Highlight/Outline Settings")]
+    [Tooltip("Warna highlight garis tepi (outline) untuk barang belanjaan.")]
+    [SerializeField] private Color highlightColor = Color.yellow;
+
+    [Tooltip("Ketebalan highlight garis tepi (outline) untuk barang belanjaan.")]
+    [SerializeField] private float highlightWidth = 4f;
 
     [Header("UI Preview References")]
     [Tooltip("GameObject Text untuk nama Goods 1.")]
@@ -231,7 +241,16 @@ public class ObjectiveManager : MonoBehaviour
             
             if (prefab != null)
             {
-                Instantiate(prefab, spawnPoint.position, spawnPoint.rotation);
+                // Spawn objek baru
+                GameObject spawnedObj = Instantiate(prefab, spawnPoint.position, spawnPoint.rotation);
+                
+                // LOGIC DI BALIK LAYAR (Optimalisasi Mobile - Group Parenting):
+                // Mengelompokkan semua barang belanjaan hasil spawn ke dalam satu parent khusus.
+                // Ini mempermudah pencarian visual outline secara terarah tanpa menggunakan Find global yang mahal.
+                if (spawnedObjectsParent != null)
+                {
+                    spawnedObj.transform.SetParent(spawnedObjectsParent);
+                }
             }
 
             // Berikan jeda frame agar CPU dapat bernapas
@@ -240,6 +259,9 @@ public class ObjectiveManager : MonoBehaviour
 
         // 6. Perbarui tampilan UI belanja untuk pertama kalinya setelah seluruh barang ter-spawn
         UpdateAllUI();
+
+        // Perbarui sorotan visual (highlight) awal pada barang-barang belanjaan
+        UpdateObjectHighlights();
     }
 
     /// <summary>
@@ -257,6 +279,9 @@ public class ObjectiveManager : MonoBehaviour
             
             // Perbarui tampilan UI secara menyeluruh
             UpdateAllUI();
+
+            // Perbarui sorotan visual (highlight) barang karena progres belanjanya telah berubah
+            UpdateObjectHighlights();
         }
     }
 
@@ -282,7 +307,7 @@ public class ObjectiveManager : MonoBehaviour
     }
 
     /// <summary>
-    /// Menyalakan / mematikan panel BGListObjective (Toggle).
+    /// Menyalakan / mematikan panel BGListObjective (Toggle) dan memperbarui sorotan visual barang di scene.
     /// </summary>
     public void ToggleBGListObjective()
     {
@@ -294,6 +319,66 @@ public class ObjectiveManager : MonoBehaviour
             if (bgListObjective.activeSelf)
             {
                 UpdateFullListUI();
+            }
+
+            // Perbarui sorotan visual (highlight) mengikuti aktifnya panel list belanjaan
+            UpdateObjectHighlights();
+        }
+    }
+
+    /// <summary>
+    /// Memperbarui status outline/highlight untuk semua objek belanjaan yang telah di-spawn.
+    /// Hanya objek yang termasuk dalam target belanja yang belum terpenuhi yang akan menyala.
+    /// Mengurangi beban kerja di mobile dengan membatasi iterasi hanya pada anak-anak spawnedObjectsParent.
+    /// </summary>
+    private void UpdateObjectHighlights()
+    {
+        if (spawnedObjectsParent == null) return;
+
+        // Mode highlight aktif jika panel list belanja sedang terbuka
+        bool isHighlightActive = bgListObjective != null && bgListObjective.activeSelf;
+
+        // Kumpulkan daftar nama barang belanjaan yang masih kurang (belum terpenuhi)
+        HashSet<string> incompleteItemNames = new HashSet<string>();
+        foreach (var item in objectives)
+        {
+            if (item.currentAmount < item.requiredAmount)
+            {
+                incompleteItemNames.Add(item.itemName);
+            }
+        }
+
+        // Loop ke semua anak objek di bawah parent transform khusus belanjaan
+        foreach (Transform child in spawnedObjectsParent)
+        {
+            if (child == null) continue;
+
+            // Cari komponen ObjectScript untuk mencocokkan nama barang
+            ObjectScript objScript = child.GetComponent<ObjectScript>();
+            if (objScript == null) objScript = child.GetComponentInParent<ObjectScript>();
+            if (objScript == null) objScript = child.GetComponentInChildren<ObjectScript>();
+
+            if (objScript != null)
+            {
+                // Tentukan apakah objek ini harus menyala (active + masuk daftar target belanja yang belum selesai)
+                bool shouldHighlight = isHighlightActive && incompleteItemNames.Contains(objScript.ObjName);
+
+                // Dapatkan atau buat komponen Outline secara dinamis jika belum terpasang
+                Outline outline = child.GetComponent<Outline>();
+                if (outline == null) outline = child.GetComponentInChildren<Outline>();
+
+                if (outline == null)
+                {
+                    outline = child.gameObject.AddComponent<Outline>();
+                    
+                    // Gunakan konfigurasi warna dan lebar dari Inspector
+                    outline.OutlineMode = Outline.Mode.OutlineAll;
+                    outline.OutlineColor = highlightColor;
+                    outline.OutlineWidth = highlightWidth;
+                }
+
+                // Nyalakan atau matikan outline sesuai status
+                outline.ToggleOutline(shouldHighlight);
             }
         }
     }

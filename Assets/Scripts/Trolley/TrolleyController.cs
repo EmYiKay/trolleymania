@@ -21,13 +21,22 @@ public class TrolleyController : MonoBehaviour
     [Tooltip("Seberapa cepat trolley mengerem saat joystick dilepas.")]
     [SerializeField] private float deceleration = 4f;
 
+    [Tooltip("Batas mati input joystick (deadzone). Input di bawah nilai ini akan diabaikan.")]
+    [SerializeField] private float inputDeadzone = 0.1f;
+
     [Header("Steering Settings")]
     [Tooltip("Kecepatan rotasi/belok dasar saat trolley bergerak lambat.")]
     [SerializeField] private float baseTurnSpeed = 90f;
 
+    [Tooltip("Ambang batas rasio kecepatan (0-1) di mana kemudi mulai terkunci sangat berat (full speed threshold).")]
+    [SerializeField] private float heavyTurnSpeedThreshold = 0.75f;
+
     [Tooltip("Pengali kecepatan belok saat berada di kecepatan maksimum. Semakin kecil nilainya, semakin sukar dibelokkan saat kencang (Inersia berat).")]
     [Range(0.05f, 0.8f)]
     [SerializeField] private float turnDifficultyAtMaxSpeed = 0.2f;
+
+    [Tooltip("Sudut belok minimal untuk memicu rotasi fisik Rigidbody.")]
+    [SerializeField] private float minTurnAngleThreshold = 0.0001f;
 
     [Header("Weight/Cargo Settings")]
     [Tooltip("Berat barang bawaan saat ini (bisa dimodifikasi oleh script lain nanti).")]
@@ -59,11 +68,10 @@ public class TrolleyController : MonoBehaviour
     // Hal ini digunakan untuk mengurangi akselerasi dan daya belok secara proporsional.
     public float WeightFactor => 1f / (1f + (currentWeight * weightImpactMultiplier));
 
-    // Menghitung rasio kecepatan saat ini terhadap kecepatan maksimum.
-    // LOGIC DI BALIK LAYAR: Menggunakan kecepatan dari variabel persistent (Forward & Sideway) untuk mendapatkan target kemudi yang stabil.
-    // Dibatasi antara 0 dan 1 (Mathf.Clamp01). Nilai 0 berarti diam, nilai 1 berarti bergerak pada atau melebihi kecepatan maksimum.
-    // Digunakan sebagai parameter interpolation (lerp) untuk menentukan seberapa berat kontrol kemudi.
-    public float CurrentSpeedRatio => Mathf.Clamp01(new Vector2(currentSidewaySpeed, currentForwardSpeed).magnitude / maxSpeed);
+    // Menghitung rasio kecepatan saat ini terhadap kecepatan maksimum acuan (maxSpeed yang disesuaikan dengan berat).
+    // LOGIC DI BALIK LAYAR: Menggunakan kecepatan dari variabel persistent (Forward & Sideway) dibanding dengan maxSpeed * WeightFactor.
+    // Dibatasi antara 0 dan 1 (Mathf.Clamp01). Digunakan oleh UI, kontrol kemudi, dan detektor kerusakan (TrolleyCollisionHandler).
+    public float CurrentSpeedRatio => Mathf.Clamp01(new Vector2(currentSidewaySpeed, currentForwardSpeed).magnitude / (maxSpeed * WeightFactor));
 
     private void Start()
     {
@@ -100,34 +108,36 @@ public class TrolleyController : MonoBehaviour
     /// </summary>
     private void MoveTrolley(Vector2 input)
     {
-        // Ambil faktor beban barang untuk membatasi performa mesin pergerakan trolley
+        // Ambil faktor beban barang untuk membatasi performa akselerasi & deselerasi trolley
         float weightFactor = WeightFactor;
 
         // 1. Tentukan target kecepatan lokal berdasarkan input joystick (X untuk menyamping, Y untuk maju/mundur)
-        float targetForwardSpeed = input.y * maxSpeed * weightFactor;
-        float targetSidewaySpeed = input.x * maxSpeed * weightFactor;
+        //    LOGIC DI BALIK LAYAR: Top speed tidak lagi dikalikan dengan weightFactor, 
+        //    sehingga trolley tetap bisa mencapai kecepatan penuh (maxSpeed) meskipun memuat banyak barang.
+        float targetForwardSpeed = input.y * maxSpeed;
+        float targetSidewaySpeed = input.x * maxSpeed;
 
         // 2. Akselerasi/Deselerasi sumbu Z Lokal (Maju - Mundur) secara persistent.
-        //    LOGIC DI BALIK LAYAR: Menggunakan variabel persistent (currentForwardSpeed) alih-alih mengambil kecepatan langsung
-        //    dari Rigidbody. Jika mengambil langsung dari Rigidbody, gaya gesek fisik (friction/drag) dari mesin fisika Unity
-        //    akan meredam kecepatan tersebut di setiap frame, menghentikan akumulasi akselerasi dari posisi diam.
-        if (Mathf.Abs(input.y) > 0.1f)
+        //    LOGIC DI BALIK LAYAR: Akselerasi dan deselerasi dikalikan dengan weightFactor.
+        //    Semakin berat beban barang, semakin lama waktu yang dibutuhkan trolley untuk berakselerasi 
+        //    ke top speed, dan semakin lama/jauh jarak rem yang dibutuhkan untuk berhenti (efek inersia).
+        if (Mathf.Abs(input.y) > inputDeadzone)
         {
             currentForwardSpeed = Mathf.MoveTowards(currentForwardSpeed, targetForwardSpeed, acceleration * weightFactor * Time.fixedDeltaTime);
         }
         else
         {
-            currentForwardSpeed = Mathf.MoveTowards(currentForwardSpeed, 0f, deceleration * Time.fixedDeltaTime);
+            currentForwardSpeed = Mathf.MoveTowards(currentForwardSpeed, 0f, deceleration * weightFactor * Time.fixedDeltaTime);
         }
 
         // 3. Akselerasi/Deselerasi sumbu X Lokal (Kiri - Kanan / Menyamping) secara persistent.
-        if (Mathf.Abs(input.x) > 0.1f)
+        if (Mathf.Abs(input.x) > inputDeadzone)
         {
             currentSidewaySpeed = Mathf.MoveTowards(currentSidewaySpeed, targetSidewaySpeed, acceleration * weightFactor * Time.fixedDeltaTime);
         }
         else
         {
-            currentSidewaySpeed = Mathf.MoveTowards(currentSidewaySpeed, 0f, deceleration * Time.fixedDeltaTime);
+            currentSidewaySpeed = Mathf.MoveTowards(currentSidewaySpeed, 0f, deceleration * weightFactor * Time.fixedDeltaTime);
         }
 
         // 4. Hitung vektor pergerakan lokal berdasarkan kecepatan persistent (transform.forward dan transform.right).
@@ -149,34 +159,42 @@ public class TrolleyController : MonoBehaviour
     }
 
     /// <summary>
-    /// Mengontrol rotasi/belokan trolley berdasarkan input swipe dengan efek inersia (semakin kencang semakin sulit belok).
+    /// Mengontrol rotasi/belokan trolley berdasarkan input swipe dengan efek inersia (semakin kencang/berat semakin sulit belok).
     /// </summary>
     private void RotateTrolley()
     {
-        // 1. Dapatkan rasio kecepatan saat ini.
+        // 1. Dapatkan rasio kecepatan saat ini (mengacu pada virtual max speed yang disesuaikan berat).
         float speedRatio = CurrentSpeedRatio;
 
         // 2. Tentukan pengali kemudahan putar berdasarkan kecepatan (Need for Seat style).
         // LOGIC DI BALIK LAYAR:
-        // Kita menggunakan Mathf.Lerp untuk menginterpolasi nilai sensitivitas rotasi.
-        // - Jika speedRatio = 0 (diam / lambat), pengali = 1f (sensitivitas penuh, sangat ringan dibelokkan).
-        // - Jika speedRatio = 1 (kecepatan maksimal), pengali = turnDifficultyAtMaxSpeed (misal 0.2f, rotasi menjadi sangat lambat/berat).
-        float speedTurnMultiplier = Mathf.Lerp(1f, turnDifficultyAtMaxSpeed, speedRatio);
+        // Jika kecepatan mencapai atau melebihi batas (heavyTurnSpeedThreshold), 
+        // kita paksa pengali rotasi menjadi turnDifficultyAtMaxSpeed (belokan sangat berat/kaku).
+        // Jika di bawah threshold, kita lakukan interpolasi linier (Lerp) secara mulus dari ringan (1.0f) ke berat.
+        float speedTurnMultiplier;
+        if (speedRatio >= heavyTurnSpeedThreshold)
+        {
+            speedTurnMultiplier = turnDifficultyAtMaxSpeed;
+        }
+        else
+        {
+            float normalizedRatio = speedRatio / heavyTurnSpeedThreshold;
+            speedTurnMultiplier = Mathf.Lerp(1f, turnDifficultyAtMaxSpeed, normalizedRatio);
+        }
 
-        // 3. Ambil faktor beban barang. Semakin banyak barang, trolley semakin sukar dirubah orientasinya.
+        // 3. Ambil faktor beban barang. Semakin banyak barang, trolley semakin sukar dirubah orientasinya (berat di semua kondisi).
         float weightFactor = WeightFactor;
 
         // 4. Hitung sudut putar akhir (dalam derajat) untuk frame fisika ini.
-        //    Sudut dihitung dari akumulasi geser layar dikali faktor pengurangan kecepatan dan beban.
-        //    PENTING: Kita tidak mengalikannya dengan Time.fixedDeltaTime di sini karena input swipe ('accumulatedSwipeRotationInput')
-        //    adalah representasi langsung dari 'delta displacement' (jarak geser pixel/mouse per frame), bukan laju perubahan waktu.
+        //    Sudut dihitung dari akumulasi geser layar dikali faktor reduksi kecepatan dan berat beban barang.
+        //    Ini menjamin belokan terasa berat baik saat diam, berjalan lambat, maupun saat meluncur kencang.
         float turnAngle = accumulatedSwipeRotationInput * speedTurnMultiplier * weightFactor;
 
         // 5. Reset akumulator setelah nilainya digunakan agar tidak terjadi double-rotation pada frame berikutnya.
         accumulatedSwipeRotationInput = 0f;
 
         // 6. Jika terdapat perubahan sudut rotasi yang cukup signifikan
-        if (Mathf.Abs(turnAngle) > 0.0001f)
+        if (Mathf.Abs(turnAngle) > minTurnAngleThreshold)
         {
             // Buat rotasi delta berupa Quaternion mengelilingi sumbu Y (horizontal).
             Quaternion turnRotation = Quaternion.Euler(0f, turnAngle, 0f);

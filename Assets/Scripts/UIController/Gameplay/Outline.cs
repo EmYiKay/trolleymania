@@ -111,11 +111,6 @@ public class Outline : MonoBehaviour {
     needsUpdate = true;
   }
 
-  private void Start()
-  {
-    ToggleOutline(true);
-  }
-
   private void BakeMaterialsCache() {
     materialCaches.Clear();
     foreach (var renderer in renderers) {
