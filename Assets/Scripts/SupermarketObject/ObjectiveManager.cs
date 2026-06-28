@@ -34,6 +34,11 @@ public class ObjectiveManager : MonoBehaviour
     [Tooltip("Parent transform khusus untuk objek belanjaan (Collectable) yang di-spawn.")]
     [SerializeField] private Transform collectableObjectsParent;
 
+    /// <summary>
+    /// Property publik untuk mendapatkan parent transform khusus objek belanjaan (Collectable).
+    /// </summary>
+    public Transform CollectableObjectsParent => collectableObjectsParent;
+
     [Tooltip("Parent transform khusus untuk objek senjata/lemparan (Throwable) yang di-spawn.")]
     [SerializeField] private Transform throwableObjectsParent;
 
@@ -96,7 +101,64 @@ public class ObjectiveManager : MonoBehaviour
         else
         {
             Destroy(gameObject);
+            return;
         }
+
+        // KODENYA TERSPESIALISASI: Resolusi otomatis jika referensi di Inspector kosong
+        if (bgListObjective == null)
+        {
+            Canvas canvas = FindObjectOfType<Canvas>();
+            if (canvas != null)
+            {
+                Transform targetTrans = FindChildRecursive(canvas.transform, "Objective");
+                if (targetTrans != null)
+                {
+                    bgListObjective = targetTrans.gameObject;
+                    Debug.Log("[ObjectiveManager] Berhasil mendeteksi bgListObjective secara otomatis: " + bgListObjective.name);
+                }
+            }
+        }
+
+        if (collectableObjectsParent == null)
+        {
+            GameObject obj = GameObject.Find("CollectableObjectsParent");
+            if (obj != null)
+            {
+                collectableObjectsParent = obj.transform;
+            }
+            else
+            {
+                obj = GameObject.Find("Collectable");
+                if (obj != null) collectableObjectsParent = obj.transform;
+            }
+        }
+
+        if (spawnedObjectsParent == null)
+        {
+            GameObject obj = GameObject.Find("SpawnedObjectsParent");
+            if (obj != null) spawnedObjectsParent = obj.transform;
+        }
+    }
+
+    /// <summary>
+    /// Helper rekursif untuk mencari GameObject anak berdasarkan nama (aman untuk objek nonaktif).
+    /// </summary>
+    private Transform FindChildRecursive(Transform parent, string name)
+    {
+        for (int i = 0; i < parent.childCount; i++)
+        {
+            Transform child = parent.GetChild(i);
+            if (child.name == name)
+            {
+                return child;
+            }
+            Transform found = FindChildRecursive(child, name);
+            if (found != null)
+            {
+                return found;
+            }
+        }
+        return null;
     }
 
     private void Start()
@@ -404,7 +466,32 @@ public class ObjectiveManager : MonoBehaviour
 
         // Tentukan target parent untuk iterasi. Prioritas utama adalah collectableObjectsParent, fallback ke spawnedObjectsParent
         Transform searchParent = collectableObjectsParent != null ? collectableObjectsParent : spawnedObjectsParent;
-        if (searchParent == null) return;
+        
+        // KODENYA TERSPESIALISASI: Jika parent search null atau kosong, lakukan pencarian global di scene sebagai fallback aman
+        if (searchParent == null || searchParent.childCount == 0)
+        {
+            ObjectScript[] allObjects = FindObjectsOfType<ObjectScript>();
+            foreach (ObjectScript objScript in allObjects)
+            {
+                if (objScript == null) continue;
+                bool shouldHighlight = isHighlightActive && incompleteItemNames.Contains(objScript.ObjName);
+
+                // Dapatkan atau buat komponen Outline secara dinamis jika belum terpasang
+                Outline outline = objScript.GetComponent<Outline>();
+                if (outline == null) outline = objScript.GetComponentInChildren<Outline>();
+
+                if (outline == null)
+                {
+                    outline = objScript.gameObject.AddComponent<Outline>();
+                    outline.OutlineMode = Outline.Mode.OutlineAll;
+                    outline.OutlineColor = highlightColor;
+                    outline.OutlineWidth = highlightWidth;
+                }
+
+                outline.ToggleOutline(shouldHighlight);
+            }
+            return;
+        }
 
         // Loop ke semua anak objek di bawah parent transform khusus belanjaan
         foreach (Transform child in searchParent)

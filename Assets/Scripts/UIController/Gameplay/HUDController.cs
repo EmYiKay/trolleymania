@@ -193,6 +193,9 @@ public class HUDController : MonoBehaviour
         {
             throwButton.interactable = (equippedWeapon != null);
         }
+
+        // KODENYA TERSPESIALISASI: Tampilkan crosshair secara otomatis jika player sedang memegang senjata/barang siap lempar
+        FadeCrosshair(equippedWeapon != null);
     }
 
     private Coroutine crosshairFadeCoroutine;
@@ -398,16 +401,24 @@ public class HUDController : MonoBehaviour
         {
             obj.transform.position = target.position;
 
-            // Tempelkan objek menjadi anak (child) dari spawn point agar posisinya mengikuti pergerakan trolley/player
-            obj.transform.SetParent(target);
-
             Debug.Log($"[HUDController] '{obj.name}' berhasil sampai di target '{target.name}'. Mengembalikan collider & physics...");
 
             if (isGoods)
             {
+                // KODENYA TERSPESIALISASI:
+                // Jangan jadikan child dari objSpawnPoint saat rb/fisika aktif agar tidak membebani pergerakan trolley.
+                // Tempatkan di bawah CollectableObjectsParent atau null agar posisinya bebas selama proses jatuh.
+                if (ObjectiveManager.Instance != null && ObjectiveManager.Instance.CollectableObjectsParent != null)
+                {
+                    obj.transform.SetParent(ObjectiveManager.Instance.CollectableObjectsParent);
+                }
+                else
+                {
+                    obj.transform.SetParent(null);
+                }
+
                 // LOGIC DI BALIK LAYAR (Barang Masuk Trolley):
-                // Jika itu barang belanjaan (Goods), nyalakan kembali fisika dan collider-nya
-                // agar ia langsung jatuh bebas secara alami dan menumpuk di dalam keranjang trolley.
+                // Nyalakan kembali fisika dan collider-nya agar ia jatuh secara alami ke dalam trolley.
                 foreach (Collider col in colliders)
                 {
                     col.enabled = true;
@@ -423,6 +434,9 @@ public class HUDController : MonoBehaviour
             }
             else
             {
+                // Tempelkan objek menjadi anak (child) dari spawn point agar posisinya mengikuti pergerakan trolley/player (untuk senjata)
+                obj.transform.SetParent(target);
+                
                 // LOGIC DI BALIK LAYAR (Senjata Digenggam):
                 // Jika itu senjata (Weapon), biarkan collider & Rigidbody TETAP MATI agar senjata tersebut
                 // menempel sempurna di tangan pemain tanpa jatuh ke tanah akibat gravitasi.

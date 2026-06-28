@@ -17,6 +17,9 @@ public class TrolleyAreaDetector : MonoBehaviour
     // Event yang dipicu ketika daftar barang di dalam trolley berubah (ditambah/dikurang)
     public System.Action OnTrolleyItemsChanged;
 
+    [Tooltip("Titik penempatan barang di dalam keranjang Trolley (ObjSpawnPoint).")]
+    [SerializeField] private Transform objSpawnPoint;
+
     /// <summary>
     /// Mendapatkan list objek yang berada di dalam trolley.
     /// </summary>
@@ -32,6 +35,12 @@ public class TrolleyAreaDetector : MonoBehaviour
         if (trolleyController == null)
         {
             Debug.LogError("TrolleyAreaDetector: TrolleyController tidak ditemukan pada parent GameObject!");
+        }
+
+        // Cari ObjSpawnPoint secara otomatis sebagai fallback
+        if (objSpawnPoint == null && transform.parent != null)
+        {
+            objSpawnPoint = transform.parent.Find("ObjSpawnPoint");
         }
     }
 
@@ -52,6 +61,9 @@ public class TrolleyAreaDetector : MonoBehaviour
             // 2. Jika memiliki ObjectScript dan statusnya masih Grounded (di luar trolley)
             if (objectScript != null && objectScript.Status == ObjectStatus.Grounded)
             {
+                // Daftarkan parent trolley ke objek agar dia tahu kemana harus menempel saat diam
+                objectScript.SetTrolleyParent(objSpawnPoint);
+
                 // Ubah status menjadi Taken agar sistem interaksi skip objek ini dari highlight
                 objectScript.Status = ObjectStatus.Taken;
 

@@ -46,6 +46,9 @@ public class ObjectScript : MonoBehaviour
 
     private Coroutine sleepMonitorCoroutine;
 
+    // Referensi ke transform parent di trolley saat tidur
+    private Transform trolleyParent;
+
     private void Awake()
     {
         // OPTIMALISASI MOBILE WEBGL:
@@ -82,11 +85,50 @@ public class ObjectScript : MonoBehaviour
     }
 
     /// <summary>
+    /// Menyetel parent transform trolley secara logis ketika barang masuk ke area deteksi trolley.
+    /// </summary>
+    public void SetTrolleyParent(Transform parent)
+    {
+        trolleyParent = parent;
+    }
+
+    /// <summary>
+    /// Mengaktifkan atau menonaktifkan seluruh collider fisik pada barang belanjaan ini.
+    /// Menghindari collider bertabrakan dengan bodi trolley yang memicu feedback physics loop.
+    /// </summary>
+    private void SetCollidersEnabled(bool enabled)
+    {
+        Collider[] colliders = GetComponentsInChildren<Collider>();
+        for (int i = 0; i < colliders.Length; i++)
+        {
+            // Jangan mematikan areaTrigger collider (jika ada) karena areaTrigger mendeteksi barang di sekitar
+            if (areaTrigger != null && colliders[i] == areaTrigger.GetComponent<Collider>())
+            {
+                continue;
+            }
+            colliders[i].enabled = enabled;
+        }
+    }
+
+    /// <summary>
     /// Membangunkan Rigidbody secara fisik agar siap bertabrakan/bergerak (dipicu oleh ObjectAreaTrigger).
     /// </summary>
     public void WakeUp()
     {
         if (isPermanentlySleeping || rb == null) return;
+
+        // KODENYA TERSPESIALISASI: Keluarkan dari parent trolley agar tidak mengganggu fisika pergerakan trolley saat barang bergerak bebas
+        if (ObjectiveManager.Instance != null && ObjectiveManager.Instance.CollectableObjectsParent != null)
+        {
+            transform.SetParent(ObjectiveManager.Instance.CollectableObjectsParent);
+        }
+        else
+        {
+            transform.SetParent(null);
+        }
+
+        // Aktifkan kembali collider saat bergerak/jatuh
+        SetCollidersEnabled(true);
 
         rb.isKinematic = false;
         rb.useGravity = true;
@@ -177,6 +219,15 @@ public class ObjectScript : MonoBehaviour
         {
             areaTrigger.enabled = false;
         }
+
+        // KODENYA TERSPESIALISASI: Jadikan child dari parent trolley agar bergerak mengikuti trolley
+        if (trolleyParent != null)
+        {
+            transform.SetParent(trolleyParent);
+        }
+
+        // Matikan collider agar tidak bertabrakan dengan bodi trolley sendiri saat diam
+        SetCollidersEnabled(false);
     }
 
     // ==========================================
@@ -242,6 +293,20 @@ public class ObjectScript : MonoBehaviour
         {
             areaTrigger.enabled = true;
         }
+
+        // KODENYA TERSPESIALISASI: Keluarkan dari parent trolley agar bebas bergerak/memantul saat tabrakan
+        if (ObjectiveManager.Instance != null && ObjectiveManager.Instance.CollectableObjectsParent != null)
+        {
+            transform.SetParent(ObjectiveManager.Instance.CollectableObjectsParent);
+        }
+        else
+        {
+            transform.SetParent(null);
+        }
+
+        // Aktifkan kembali collider agar bisa memantul/tabrakan secara fisik
+        SetCollidersEnabled(true);
+
         if (rb != null)
         {
             rb.isKinematic = false;
