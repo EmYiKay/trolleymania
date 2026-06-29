@@ -215,22 +215,26 @@ public class TrolleyAreaDetector : MonoBehaviour
         for (int i = 0; i < itemsInTrolley.Count; i++)
         {
             ObjectScript obj = itemsInTrolley[i];
-            if (obj != null)
+            if (obj == null) continue;
+
+            // Bangunkan Rigidbody terlebih dahulu agar bisa menerima gaya fisika,
+            // sekaligus unparent dari trolley dan ubah layer kembali ke Goods (lihat WakeUpFromTrolleyHit)
+            obj.WakeUpFromTrolleyHit();
+
+            // OPTIMALISASI (BUG FIX #2 — Eliminasi GetComponent per item):
+            // Gunakan property Rb dari ObjectScript yang sudah di-cache di Inspector.
+            // Sebelumnya kode ini memanggil GetComponent<Rigidbody>() untuk SETIAP barang saat tabrakan
+            // — sangat berat di Mobile WebGL jika ada banyak barang di trolley.
+            Rigidbody objRb = obj.Rb;
+            if (objRb != null)
             {
-                // Bangunkan Rigidbody terlebih dahulu dan ijinkan simulasi fisika sementara
-                obj.WakeUpFromTrolleyHit();
+                // Arah dorongan acak: didominasi ke arah atas (Y), dengan sedikit kemiringan acak ke sumbu X & Z
+                float randomX = Random.Range(-0.4f, 0.4f);
+                float randomZ = Random.Range(-0.4f, 0.4f);
+                float randomY = Random.Range(0.8f, 1.3f); // Dominasi gaya ke atas agar berpotensi mental keluar
 
-                Rigidbody objRb = obj.GetComponent<Rigidbody>();
-                if (objRb != null)
-                {
-                    // Arah dorongan acak: didominasi ke arah atas (Y), dengan sedikit kemiringan acak ke sumbu X & Z
-                    float randomX = Random.Range(-0.4f, 0.4f);
-                    float randomZ = Random.Range(-0.4f, 0.4f);
-                    float randomY = Random.Range(0.8f, 1.3f); // Dominasi gaya ke atas agar berpotensi mental keluar
-
-                    Vector3 forceDirection = new Vector3(randomX, randomY, randomZ).normalized;
-                    objRb.AddForce(forceDirection * forceMagnitude, ForceMode.Impulse);
-                }
+                Vector3 forceDirection = new Vector3(randomX, randomY, randomZ).normalized;
+                objRb.AddForce(forceDirection * forceMagnitude, ForceMode.Impulse);
             }
         }
     }
